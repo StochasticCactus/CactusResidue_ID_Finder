@@ -8,20 +8,20 @@
  * Storage strategy:
  *   - constexpr array of Element structs → zero runtime cost, lives in
  *     read-only memory, works at compile time.
- *   - buildLookup() creates a std::unordered_map<std::string_view, const Element*>
+ *   - buildLookup() creates a std::unordered_map<std::string, const Element*>
  *     keyed on both symbol ("Fe") and full name ("iron") for O(1) runtime access.
- *   - findByAtomicNumber() is a simple array index (atomicNumber - 1).
+ *   - findByZ() is a simple array index (atomicNumber - 1).
  *   - elementMassFromPDBName() handles GROMACS/PDB atom-name conventions
  *     ("CA", "1HB", "OW", etc.) and is a drop-in replacement for the
  *     function in your existing code.
  *
  * Usage:
- *   #include "PeriodicTable.h"
- *   using namespace periodic;
+ *   #include "md/PeriodicTable.h"
+ *   using namespace cactus::periodic;
  *
  *   double m = table[5].mass;                          // Carbon by index
  *   const Element* e = lookup()["Fe"];                 // Iron by symbol
- *   double mass = elementMassFromPDBName("CA");        // → Calcium (40.078)
+ *   double mass = elementMassFromPDBName("CA");        // → Carbon alpha (12.011)
  */
 
 #pragma once
@@ -34,16 +34,16 @@
 #include <stdexcept>
 #include <algorithm>
 
-namespace mandacaru::periodic {
+namespace cactus::periodic {
 
 // ─── Element record ───────────────────────────────────────────────────────────
 
 struct Element {
     int         atomicNumber;
-    const char* symbol;       // e.g. "Fe"
-    const char* name;         // e.g. "iron"
-    double      mass;         // standard atomic weight (u / Da)
-    bool        stableIsotope;// false → mass is most-stable isotope (†)
+    const char* symbol;        // e.g. "Fe"
+    const char* name;          // e.g. "iron"
+    double      mass;          // standard atomic weight (u / Da)
+    bool        stableIsotope; // false → mass is most-stable isotope (†)
 };
 
 // ─── Full periodic table (Z = 1 … 118) ───────────────────────────────────────
@@ -171,8 +171,7 @@ inline constexpr std::array<Element, 118> table = {{
 }};
 
 // ─── O(1) lookup by symbol or name ───────────────────────────────────────────
-// Call once and reuse the returned map. Thread-safe after first call if used
-// with a static local (C++11 guarantees).
+// Thread-safe after first call (C++11 static-local guarantee).
 
 inline const std::unordered_map<std::string, const Element*>& lookup() {
     static const auto map = []() {
@@ -198,20 +197,16 @@ inline const Element& findByZ(int Z) {
 // ─── Derive element symbol from a PDB atom name ───────────────────────────────
 //
 // PDB / GROMACS atom-name conventions handled:
-//   "CA"  → "Ca" (alpha-carbon in proteins) … but also Calcium: resolved by
-//           checking residue context via overload below.
+//   "CA"  → alpha-carbon → "C"  (two-char lookup fails → single char "C")
 //   "1HB" → leading digit stripped → "H"
 //   "HG1" → "H"
 //   "OW"  → "O"  (TIP3P/TIP4P water)
 //   "CL"  → "Cl" (chloride ion)
-//   "NA"  → "Na" (sodium ion — but also "N" + "A" in some force fields)
+//   "NA"  → "Na" (sodium ion)
 //   "MG"  → "Mg"
 //   "FE"  → "Fe"
 //   "ZN"  → "Zn"
 //   "CU"  → "Cu"
-//
-// Strategy: strip leading digits, normalise to Title-case for 2-char test,
-// check two-letter symbols first, then fall back to first character.
 
 inline std::string elementSymbolFromPDBName(const std::string& atomName) {
     // 1. Strip leading whitespace and digits
@@ -230,12 +225,12 @@ inline std::string elementSymbolFromPDBName(const std::string& atomName) {
         if (std::isalpha((unsigned char)c))
             alpha += static_cast<char>(std::toupper((unsigned char)c));
         else if (!alpha.empty())
-            break; // stop at embedded digit/special after first alpha
+            break; // stop at embedded digit/special after first alpha char
     }
 
     if (alpha.empty()) return "C";
 
-    // 3. Normalise to Title-case for the map key ("FE" → "Fe")
+    // 3. Normalise to Title-case for map key ("FE" → "Fe")
     if (alpha.size() == 2)
         alpha[1] = static_cast<char>(std::tolower((unsigned char)alpha[1]));
 
@@ -250,7 +245,7 @@ inline std::string elementSymbolFromPDBName(const std::string& atomName) {
     return std::string(1, alpha[0]);
 }
 
-// ─── Mass from PDB atom name — drop-in replacement ───────────────────────────
+// ─── Mass from PDB atom name ───────────────────────────────────────────────────
 
 inline double elementMassFromPDBName(const std::string& atomName) {
     std::string sym = elementSymbolFromPDBName(atomName);
@@ -261,4 +256,4 @@ inline double elementMassFromPDBName(const std::string& atomName) {
     return 12.011; // unknown: fallback to carbon
 }
 
-} // namespace periodic
+} // namespace cactus::periodic
