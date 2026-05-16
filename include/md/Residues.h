@@ -4,11 +4,12 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include "md/PDBReader.h"
 
 namespace cactus::residues 
 {
 
-  std::vector<std::string> KNOWN_CARBS = {
+  const std::vector<std::string> KNOWN_CARBS = {
     //Hexoses
     "GLC", "BGC", "BGLC", "GLA", "GAL", "MAN", "BMA",
     "FRU", "TAG", "SOR",
@@ -27,10 +28,11 @@ namespace cactus::residues
     //Generic / other
     "SGN", "SHB", "GCS", "l:b", "LSB", "LB"};
 
-    std::unordered_map<std::string, std::vector<std::string>>  ACIDIC_OXY;
-    ACIDIC_OXY["GLU"] = {"OE1", "OE2"};
-    ACIDIC_OXY["ASP"] = {"OD1", "OD2"};
+   const  std::unordered_map<std::string, std::vector<std::string>> ACIDIC_OXY = {{"GLU", {"OE1", "OE2"}}, {"ASP", {"OD1", "OD2"}}};
+
+   bool is_carbohydrate(std::string residue, std::vector<std::string> KNOWN_CARBS);
+
+   std::vector<cactus::pdb::PDBAtom> CollectCarbohydrateATOMS(std::vector<cactus::pdb::PDBAtom> & atoms, const std::vector<std::string> KNOWN_CARBS);
 
 }
-
 #endif

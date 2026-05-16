@@ -16,7 +16,8 @@ endif()
 # ── Library: md ───────────────────────────────────────────────────────────────
 # PeriodicTable is header-only, so only PDBReader.cpp needs compiling.
 add_library(md
-    src/PDBReader.cpp
+    src/PDBReader.cpp 
+    src/Residues.cpp
 )
 
 target_include_directories(md
