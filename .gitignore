@@ -64,6 +64,7 @@ vcpkg_installed/
 # debug information files
 *.dwo
 
+output_RFD3
 # test output & cache
 Testing/
 .cache/
