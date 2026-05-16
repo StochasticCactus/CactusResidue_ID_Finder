@@ -2,6 +2,7 @@
 #include "md/PeriodicTable.h"
 #include "md/Residues.h"
 #include "utility/fileHandler.h"
+#include "md/sorting.h"
 #include <iostream>
 #include <iomanip>
 #include <numeric>
@@ -10,6 +11,7 @@
 using namespace cactus;
 using namespace cactus::pdb;
 using namespace cactus::residues;
+using namespace cactus::sort;
 
 int main(int argc, char* argv[]) {
     // Accept a PDB path on the command line, or fall back to a default.
@@ -28,13 +30,20 @@ int main(int argc, char* argv[]) {
             return 1;
         }
 
-       auto CarbATOMS = CollectCarbohydrateATOMS(atoms, KNOWN_CARBS);
-      
+       auto CarbATOMS  = CollectCarbohydrateATOMS(atoms, KNOWN_CARBS);
+       auto candidates = FilterAcidicResidues(atoms, CarbATOMS, ACIDIC_OXY, 8.0);
+       auto pairs      = FilterResiduePairs(candidates, 20.0);
+
+       for (const auto & p : pairs)
+       {
+         std::cout << std::to_string(p.first.first) << "-" << std::to_string(p.first.second) << "--" 
+         << std::to_string(p.second) << std::endl;
+       }
 
 
 
 
-    
+        /*
         // ── print a summary table ─────────────────────────────────────────────────
         std::cout << std::left
                   << std::setw(6)  << "serial"
@@ -51,7 +60,7 @@ int main(int argc, char* argv[]) {
                   << std::string(79, '-') << "\n";
 
         std::cout << std::fixed << std::setprecision(3);
-
+      
         for (const auto& a : CarbATOMS) {
             std::cout << std::left
                       << std::setw(6)  << a.serial
@@ -65,7 +74,7 @@ int main(int argc, char* argv[]) {
                       << std::setw(10) << a.occupancy
                       << std::setw(10) << a.mass
                       << "\n";
-        }
+        }*/
       
     }
     return 0;

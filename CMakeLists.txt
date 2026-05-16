@@ -18,6 +18,7 @@ endif()
 add_library(md
     src/PDBReader.cpp 
     src/Residues.cpp
+    src/sorting.cpp
 )
 
 target_include_directories(md
