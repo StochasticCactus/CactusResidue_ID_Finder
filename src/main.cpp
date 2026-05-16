@@ -33,10 +33,12 @@ int main(int argc, char* argv[]) {
        auto CarbATOMS  = CollectCarbohydrateATOMS(atoms, KNOWN_CARBS);
        auto candidates = FilterAcidicResidues(atoms, CarbATOMS, ACIDIC_OXY, 8.0);
        auto pairs      = FilterResiduePairs(candidates, 20.0);
+        
+       std::cout << "### " << file.path() << "###" << std::endl;
 
        for (const auto & p : pairs)
        {
-         std::cout << std::to_string(p.first.first) << "-" << std::to_string(p.first.second) << "--" 
+          std::cout << std::to_string(p.first.first) << "-" << std::to_string(p.first.second) << "--" 
          << std::to_string(p.second) << std::endl;
        }
 

@@ -71,7 +71,7 @@ namespace cactus::sort {
 
     for (size_t i = 0; i < atoms.size(); i++)
     {
-        for (size_t j = i + 1; j < atoms.size() + 1; j++)
+        for (size_t j = i + 1; j < atoms.size(); j++)
         {             
             if (atoms[i].atom.resSeq != atoms[j].atom.resSeq)  
             {
@@ -85,6 +85,12 @@ namespace cactus::sort {
                       
         }
     }
+    
+    std::sort(pairs.begin(), pairs.end(),
+    [](const auto& a, const auto& b) {
+        return a.second < b.second; // ascending
+    });
+
     return pairs;
   }
 }
