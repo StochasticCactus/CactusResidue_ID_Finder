@@ -28,7 +28,7 @@ namespace cactus::residues
     //Generic / other
     "SGN", "SHB", "GCS", "l:b", "LSB", "LB"};
 
-   const  std::unordered_map<std::string, std::vector<std::string>> ACIDIC_OXY = {{"GLU", {"OE1", "OE2"}}, {"ASP", {"OD1", "OD2"}}};
+   const std::unordered_map<std::string, std::vector<std::string>> ACIDIC_OXY = {{"GLU", {"OE1", "OE2"}}, {"ASP", {"OD1", "OD2"}}};
 
    bool is_carbohydrate(std::string residue, std::vector<std::string> KNOWN_CARBS);
 
