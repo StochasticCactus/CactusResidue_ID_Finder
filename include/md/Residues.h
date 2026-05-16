@@ -33,6 +33,6 @@ namespace cactus::residues
    bool is_carbohydrate(std::string residue, std::vector<std::string> KNOWN_CARBS);
 
    std::vector<cactus::pdb::PDBAtom> CollectCarbohydrateATOMS(std::vector<cactus::pdb::PDBAtom> & atoms, const std::vector<std::string> KNOWN_CARBS);
-
+    
 }
 #endif
