@@ -19,6 +19,7 @@
 #include "md/PeriodicTable.h"
 #include "md/Residues.h"
 #include "utility/fileHandler.h"
+#include "utility/progressBar.h"
 #include "md/sorting.h"
 
 #include <iostream>
@@ -38,7 +39,7 @@ using namespace cactus::sort;
 // ── Runtime configuration ─────────────────────────────────────────────────────
 
 struct Config {
-    std::string inputPath  = "./";       // directory that holds the PDB files
+    std::string inputPath  = "./";        // directory that holds the PDB files
     std::string outputFile = "results.log";
 
     // Distance (Å) from an acidic-residue oxygen to any carbohydrate atom.
@@ -140,7 +141,6 @@ int main(int argc, char* argv[])
     const Config cfg = parseArgs(argc, argv);
 
     // Full table of supported acidic residues and their catalytic oxygens.
-    // Keeping this here rather than in the header makes it easy to extend.
     const std::unordered_map<std::string, std::vector<std::string>> ALL_ACIDIC_OXY = {
         {"GLU", {"OE1", "OE2"}},
         {"ASP", {"OD1", "OD2"}}
@@ -182,41 +182,51 @@ int main(int argc, char* argv[])
 
     // ── Process each PDB file in the directory ────────────────────────────────
 
+    // Collect the file list upfront so we know the total count for the bar.
+    // directory_iterator is an input iterator with no .size() or operator[],
+    // so we materialise it into a vector using the iterator-pair constructor.
+    // The default-constructed directory_iterator{} serves as the end sentinel.
     StructuresDir wdir(cfg.inputPath);
+    const std::vector<std::filesystem::directory_entry> files(
+        wdir.dirFiles(), std::filesystem::directory_iterator{});
+    const size_t total = files.size();
 
-    for (const auto& file : wdir.dirFiles()) {
+    for (size_t idx = 0; idx < total; ++idx) {
+        const auto& file = files[idx];
+
+        // Draw / update the progress bar on stderr so it doesn't interfere
+        // with piped stdout output.
+        cactus::util::printProgress(idx, total, file.path());
 
         std::vector<PDBAtom> atoms;
         try {
             atoms = parsePDB(file.path());
         } catch (const std::exception& ex) {
-            std::cerr << "Error parsing " << file.path() << ": " << ex.what() << "\n";
-            continue;   // skip broken files rather than aborting the whole run
+            // Print below the bar, then let the next iteration redraw it.
+            std::cerr << "\nError parsing " << file.path()
+                      << ": " << ex.what() << "\n";
+            continue;
         }
 
         // 1. Collect all atoms that belong to known carbohydrate residues.
-        auto carbAtoms = CollectCarbohydrateATOMS(atoms, KNOWN_CARBS);
+        auto carbAtoms  = CollectCarbohydrateATOMS(atoms, KNOWN_CARBS);
 
         // 2. Find acidic-residue oxygens within carbCutoff of any carb atom.
         auto candidates = FilterAcidicResidues(atoms, carbAtoms, acidicOxy, cfg.carbCutoff);
 
         // 3. Find pairs of candidate residues within pairCutoff of each other,
         //    deduplicated so each {res1, res2} pair appears only once.
-        auto pairs = FilterResiduePairs(candidates, cfg.pairCutoff);
+        auto pairs      = FilterResiduePairs(candidates, cfg.pairCutoff);
 
-        // ── Per-file output ───────────────────────────────────────────────────
-
-        std::cout << "### " << file.path() << " ###\n";
-        logFile   << "# FILE: " << file.path() << "\n";
+        // Write results to the log file only; the bar owns the terminal line.
+        logFile << "# FILE: " << file.path() << "\n";
 
         if (pairs.empty()) {
-            std::cout << "  (no pairs found)\n";
-            logFile   << "  (no pairs found)\n";
+            logFile << "  (no pairs found)\n";
             continue;
         }
 
         for (const auto& p : pairs) {
-            // Format each result as a single, grep-able PAIR line.
             std::ostringstream oss;
             oss << std::fixed << std::setprecision(3);
             oss << "PAIR"
@@ -224,13 +234,13 @@ int main(int argc, char* argv[])
                 << "  res1=" << p.first.first
                 << "  res2=" << p.first.second
                 << "  dist=" << p.second;
-
-            const std::string line = oss.str();
-            std::cout << line << "\n";
-            logFile   << line << "\n";
+            logFile << oss.str() << "\n";
         }
     }
 
-    std::cout << "\nResults written to: " << cfg.outputFile << "\n";
+    // Final call completes the bar and moves the cursor to the next line.
+    cactus::util::printProgress(total, total);
+
+    std::cout << "Results written to: " << cfg.outputFile << "\n";
     return 0;
 }

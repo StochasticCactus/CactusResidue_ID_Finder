@@ -28,5 +28,5 @@ target_include_directories(md
 )
 
 # ── Executable ────────────────────────────────────────────────────────────────
-add_executable(cactus_md src/main.cpp)
-target_link_libraries(cactus_md PRIVATE md)
+add_executable(cactus_resid src/main.cpp)
+target_link_libraries(cactus_resid PRIVATE md)
