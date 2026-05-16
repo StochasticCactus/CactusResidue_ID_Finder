@@ -27,18 +27,6 @@ namespace cactus::residues {
     } 
 
     
-    std::vector<PDBAtom> sortAcidicResidues(std::vector<PDBAtoms> & atoms, const std::unordered_map<std::string, std::vector<std::string>> ACIDIC_OXY)
-    {
-      for (const auto & atom : atoms)
-      {
-        
-
-
-        
-      }
-
-
-    }
 
 
   
