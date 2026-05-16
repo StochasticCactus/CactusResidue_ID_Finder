@@ -1,9 +1,0 @@
-pdb_file,carb_atoms_found,res1_chain,res1_name,res1_seq,res1_dist,res2_chain,res2_name,res2_seq,res2_dist,pair_dist_A,status
-rfd3_GH_GH_0_model_0.pdb,45,A,GLU,36,2.457,A,GLU,115,2.511,6.55,OK
-rfd3_GH_GH_0_model_1.pdb,45,A,GLU,114,2.457,A,GLU,11,2.511,6.55,OK
-rfd3_GH_GH_0_model_2.pdb,45,A,GLU,27,2.457,A,GLU,50,2.511,6.55,OK
-rfd3_GH_GH_0_model_3.pdb,45,A,GLU,113,2.457,A,GLU,44,2.511,6.55,OK
-rfd3_GH_GH_0_model_4.pdb,45,A,GLU,104,2.457,A,GLU,7,2.511,6.55,OK
-rfd3_GH_GH_0_model_5.pdb,45,A,GLU,34,2.457,A,GLU,35,2.511,6.55,OK
-rfd3_GH_GH_0_model_6.pdb,45,A,GLU,82,2.457,A,GLU,36,2.511,6.55,OK
-rfd3_GH_GH_0_model_7.pdb,45,A,GLU,64,2.457,A,GLU,65,2.511,6.55,OK

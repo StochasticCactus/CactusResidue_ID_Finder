@@ -63,7 +63,10 @@ vcpkg_installed/
 
 # debug information files
 *.dwo
+ 
+.DS_STORE
 
+pdbs_RFD3
 output_RFD3
 # test output & cache
 Testing/
