@@ -1,11 +1,10 @@
 /**
  * cmd_dist.cpp
  *
- * Implementation of the 'dist' subcommand.
- * This is the original pipeline moved verbatim out of main(), with the
- * only structural change being that it lives in cactus::cmd::runDist().
- *
- * Config and argument parsing come from commandline.h (cactus::utils).
+ * 'dist' subcommand: find pairs of acidic residues (ASP / GLU) whose carboxyl
+ * midpoints lie within --carb-cutoff of any carbohydrate atom in the same
+ * structure, then report pairs of those candidates within --pair-cutoff of
+ * each other.
  */
 
 #include "utility/cmd_dist.h"
@@ -22,7 +21,6 @@
 #include <iostream>
 #include <sstream>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 using namespace cactus::pdb;
@@ -34,22 +32,17 @@ namespace cactus::cmd {
 
 int runDist(int argc, char* argv[])
 {
-    const Config cfg = parseArgs(argc, argv);
+    const Config cfg = parseDistArgs(argc, argv);
 
-    // Full table of supported acidic residues and their catalytic oxygens.
-    const std::unordered_map<std::string, std::vector<std::string>> ALL_ACIDIC_OXY = {
-        {"GLU", {"OE1", "OE2"}},
-        {"ASP", {"OD1", "OD2"}}
-    };
-
-    // Build the filtered map from the user-selected residues.
-    std::unordered_map<std::string, std::vector<std::string>> acidicOxy;
+    // Build the filtered acidic-oxygen map from the user-selected residues.
+    std::unordered_map<std::string, std::array<std::string, 2>> acidicOxy;
     for (const auto& res : cfg.acidicResidues) {
-        if (ALL_ACIDIC_OXY.count(res)) {
-            acidicOxy[res] = ALL_ACIDIC_OXY.at(res);
+        const auto it = ACIDIC_OXY.find(res);
+        if (it != ACIDIC_OXY.end()) {
+            acidicOxy[res] = it->second;
         } else {
             std::cerr << "Warning: '" << res
-                      << "' is not in the ACIDIC_OXY table — skipping.\n";
+                      << "' is not a known acidic residue — skipping.\n";
         }
     }
 
@@ -64,7 +57,6 @@ int runDist(int argc, char* argv[])
         return 1;
     }
 
-    // Self-describing log header.
     logFile << "# [dist] Acidic-residue pairs near carbohydrate residues\n"
             << "# carb-cutoff : " << cfg.carbCutoff << " Å\n"
             << "# pair-cutoff : " << cfg.pairCutoff << " Å\n"
@@ -103,7 +95,8 @@ int runDist(int argc, char* argv[])
         }
 
         auto knownCarbs = KNOWN_CARBS;
-        knownCarbs.insert(knownCarbs.end(), cfg.extraCarbs.begin(), cfg.extraCarbs.end());
+        knownCarbs.insert(knownCarbs.end(),
+                          cfg.extraCarbs.begin(), cfg.extraCarbs.end());
 
         auto carbAtoms  = CollectCarbohydrateATOMS(atoms, knownCarbs);
         auto candidates = FilterAcidicResidues(atoms, carbAtoms, acidicOxy, cfg.carbCutoff);
@@ -118,8 +111,8 @@ int runDist(int argc, char* argv[])
 
         for (const auto& p : pairs) {
             std::ostringstream oss;
-            oss << std::fixed << std::setprecision(3);
-            oss << "PAIR"
+            oss << std::fixed << std::setprecision(3)
+                << "PAIR"
                 << "  file=" << file.path()
                 << "  res1=" << p.first.first
                 << "  res2=" << p.first.second
