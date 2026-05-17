@@ -1,7 +1,7 @@
 #pragma once
 #ifndef commandline
 #define commandline
-
+#include <iostream>
 #include <sstream>
 #include <string>
 #include <vector>
