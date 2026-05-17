@@ -21,11 +21,10 @@
 #include "utility/fileHandler.h"
 #include "utility/progressBar.h"
 #include "md/sorting.h"
-
+#include "utility/commandline.h"
 #include <iostream>
 #include <iomanip>
 #include <fstream>
-#include <sstream>
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -35,36 +34,7 @@ using namespace cactus;
 using namespace cactus::pdb;
 using namespace cactus::residues;
 using namespace cactus::sort;
-
-// ── Runtime configuration ─────────────────────────────────────────────────────
-
-struct Config {
-    std::string inputPath  = "./";        // directory that holds the PDB files
-    std::string outputFile = "results.log";
-
-    // Distance (Å) from an acidic-residue oxygen to any carbohydrate atom.
-    // Only acidic residues whose oxygens are within this radius are considered.
-    double carbCutoff = 8.0;
-
-    // Distance (Å) between the oxygens of two candidate acidic residues.
-    // Only pairs closer than this are reported.
-    double pairCutoff = 20.0;
-
-    // Acidic residue types to search for.  Must be keys in ALL_ACIDIC_OXY.
-    std::vector<std::string> acidicResidues = {"GLU", "ASP"};
-};
-
-// ── Helper: split a comma-separated string ────────────────────────────────────
-
-static std::vector<std::string> splitComma(const std::string& s)
-{
-    std::vector<std::string> result;
-    std::stringstream ss(s);
-    std::string token;
-    while (std::getline(ss, token, ','))
-        if (!token.empty()) result.push_back(token);
-    return result;
-}
+using namespace cactus::utils;
 
 // ── Help text ─────────────────────────────────────────────────────────────────
 
