@@ -13,12 +13,15 @@
 # Options:
 #   -j N   Parallel jobs (default: all CPU cores)
 #   -f     Force overwrite existing .pdb files
+#   -F     Flat output: dump all .pdb files into one folder, prefixed with
+#          their source subdirectory name to avoid collisions (requires output_dir)
 #   -v     Verbose: print obabel command for each file
 #   -h     Show this help
 #
 # Examples:
 #   ./convert_cif_to_pdb.sh output_RFD3
 #   ./convert_cif_to_pdb.sh -j 4 -f output_RFD3 ./pdbs_RFD3
+#   ./convert_cif_to_pdb.sh -F output_RFD3 ./pdbs_flat
 # =============================================================================
 
 # ---------------------------------------------------------------------------
@@ -27,6 +30,7 @@
 JOBS=$(sysctl -n hw.logicalcpu 2>/dev/null || echo 4)
 FORCE=false
 VERBOSE=false
+FLAT=false
 INPUT_DIR=""
 OUTPUT_DIR=""
 
@@ -48,12 +52,13 @@ err()     { echo -e "${RED}[ERROR]${RESET} $*"; }
 # ---------------------------------------------------------------------------
 # Args
 # ---------------------------------------------------------------------------
-while getopts ":j:fvh" opt; do
+while getopts ":j:fFvh" opt; do
     case $opt in
         j) JOBS="$OPTARG" ;;
         f) FORCE=true ;;
+        F) FLAT=true ;;
         v) VERBOSE=true ;;
-        h) sed -n '3,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        h) sed -n '3,22p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         :) echo "Option -$OPTARG requires an argument."; exit 1 ;;
        \?) echo "Unknown option: -$OPTARG"; exit 1 ;;
     esac
@@ -75,6 +80,11 @@ INPUT_DIR="$(cd "$INPUT_DIR" && pwd)"
 if [[ -n "$OUTPUT_DIR" ]]; then
     mkdir -p "$OUTPUT_DIR"
     OUTPUT_DIR="$(cd "$OUTPUT_DIR" && pwd)"
+fi
+
+# -F requires an explicit output directory
+if [[ "$FLAT" == "true" && -z "$OUTPUT_DIR" ]]; then
+    err "-F (flat mode) requires an explicit output_dir argument"; exit 1
 fi
 
 # ---------------------------------------------------------------------------
@@ -111,6 +121,7 @@ fi
 info "Found ${BOLD}${TOTAL}${RESET} .cif.gz file(s)"
 info "Parallel jobs  : $JOBS"
 info "Force overwrite: $FORCE"
+info "Flat output    : $FLAT"
 [[ -n "$OUTPUT_DIR" ]] \
     && info "Output dir     : $OUTPUT_DIR" \
     || info "Output dir     : in-place (next to each .cif.gz)"
@@ -128,22 +139,32 @@ convert_one() {
     local verbose="$5"
     local log_dir="$6"
     local tmp_cif_dir="$7"
+    local flat="$8"
 
-    local base src_dir dest_dir rel_dir pdb_out tmp_cif log_file
+    local base src_dir dest_dir rel_dir pdb_out tmp_cif log_file prefix
 
     base=$(basename "$cif_gz" .cif.gz)
     src_dir=$(dirname "$cif_gz")
 
-    # Mirror subdirectory structure
+    # Determine destination path
     if [[ -n "$output_dir" ]]; then
         rel_dir="${src_dir#"$input_dir"}"
         rel_dir="${rel_dir#/}"
-        dest_dir="${output_dir}${rel_dir:+/$rel_dir}"
+        if [[ "$flat" == "true" ]]; then
+            # All files land in the single output_dir.
+            # Prefix filename with subdir path (slashes → underscores) to
+            # guarantee uniqueness when different subdirs share file names.
+            dest_dir="$output_dir"
+            prefix="${rel_dir//\//_}"
+            pdb_out="$dest_dir/${prefix:+${prefix}_}${base}.pdb"
+        else
+            dest_dir="${output_dir}${rel_dir:+/$rel_dir}"
+            pdb_out="$dest_dir/${base}.pdb"
+        fi
     else
         dest_dir="$src_dir"
+        pdb_out="$dest_dir/${base}.pdb"
     fi
-
-    pdb_out="$dest_dir/${base}.pdb"
 
     # Unique log file per job (PID + RANDOM — no flock needed)
     log_file="$log_dir/$$.${RANDOM}.log"
@@ -157,7 +178,7 @@ convert_one() {
 
     mkdir -p "$dest_dir"
 
-    # Unique temp .cif — PID + RANDOM avoids collisions; no suffix needed by mktemp
+    # Unique temp .cif — PID + RANDOM avoids collisions
     tmp_cif="${tmp_cif_dir}/${$}_${RANDOM}"
 
     if ! gunzip -c "$cif_gz" > "$tmp_cif" 2>/dev/null; then
@@ -203,6 +224,7 @@ xargs -0 -P "$JOBS" -I {} bash -c \
     "$VERBOSE" \
     "$LOG_DIR" \
     "$TMP_CIF_DIR" \
+    "$FLAT" \
     < "$FILELIST"
 
 # ---------------------------------------------------------------------------

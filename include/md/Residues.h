@@ -39,7 +39,7 @@ const std::vector<std::string> KNOWN_CARBS = {
     // Uronic acids
     "GCU", "IDR",
     // Generic / other
-    "SGN", "SHB", "GCS", "l:b", "LSB", "LB"
+    "SGN", "SHB", "GCS", "l:b", "LSB", "LB", "L:B", "l:b", "l:a", "L:A"
 };
 
 // ── Acidic-residue catalytic oxygens ─────────────────────────────────────────
