@@ -3,14 +3,21 @@
  *
  * Implementation of the 'coord' subcommand.
  *
- * For each PDB file in the input directory, every residue that has at least
- * one atom within `radius` Å of the user-supplied centre (cx, cy, cz) is
- * reported.  Each hit is written as a single grep-able line:
+ * A reference PDB file is parsed first and a subset of its atoms is extracted
+ * as anchor points (the "reference set").  For each query PDB in the input
+ * directory the same two-stage pipeline used by 'dist' is then applied, with
+ * the reference atoms playing the role that carbohydrate atoms play in 'dist':
  *
- *   RESID  file=<path>  chain=<id>  resName=<name>  resSeq=<id>  minDist=<Å>
+ *   Stage 1 — FilterAcidicResidues:  keep acidic residues whose carboxyl
+ *             midpoint (average of the two oxygens) is within --carb-cutoff
+ *             of any reference atom.
  *
- * where minDist is the distance from the centre to the closest atom of that
- * residue.  Results within a file are sorted by ascending minDist.
+ *   Stage 2 — FilterResiduePairs:    from the survivors, report deduplicated
+ *             pairs within --pair-cutoff, sorted by ascending distance.
+ *
+ * This design means 'coord' can be used with any reference geometry — a
+ * ligand, a sugar, another chain, a set of water molecules, etc. — simply by
+ * choosing appropriate --ref-residues and --ref-atoms filters.
  */
 
 #include "utility/cmd_coord.h"
@@ -25,9 +32,9 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
-#include <map>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 using namespace cactus::pdb;
@@ -35,32 +42,44 @@ using namespace cactus::sort;
 
 namespace cactus::cmd {
 
-// ── Argument parsing ──────────────────────────────────────────────────────────
+// ── Argument parsing (private to this translation unit) ───────────────────────
 
 static void printCoordHelp(const char* prog)
 {
     std::cout
-        << "Usage: " << prog << " [OPTIONS] [PATH]\n\n"
-        << "Find all residues with at least one atom within a spherical region\n"
-        << "of space, across all PDB files in PATH.\n\n"
+        << "Usage: " << prog << " --ref FILE [OPTIONS] [PATH]\n\n"
+        << "Find pairs of acidic residues (ASP / GLU) whose carboxyl groups\n"
+        << "lie within a cutoff distance of atoms in a reference PDB structure,\n"
+        << "across all query PDB files in PATH.\n\n"
         << "Arguments:\n"
-        << "  PATH                    Directory containing PDB files (default: ./)\n\n"
+        << "  PATH                    Directory of query PDB files (default: ./)\n\n"
+        << "Required:\n"
+        << "  --ref FILE              Reference PDB file that defines the anchor\n"
+        << "                          coordinate region\n\n"
         << "Options:\n"
         << "  -h, --help              Show this help message and exit\n"
         << "  -o, --output FILE       Write results to FILE (default: coord_results.log)\n"
-        << "  --cx X                  X coordinate of the sphere centre (default: 0.0)\n"
-        << "  --cy Y                  Y coordinate of the sphere centre (default: 0.0)\n"
-        << "  --cz Z                  Z coordinate of the sphere centre (default: 0.0)\n"
-        << "  --radius R              Search sphere radius in Å (default: 10.0)\n"
-        << "  --residues RES          Comma-separated residue names to restrict output to\n"
-        << "                          (default: all residues)\n\n"
+        << "  --ref-residues RES      Comma-separated residue names to extract from the\n"
+        << "                          reference (default: all residues)\n"
+        << "  --ref-atoms ATOMS       Comma-separated atom names to extract from those\n"
+        << "                          residues (default: all atoms)\n"
+        << "  --carb-cutoff DIST      Carboxyl-midpoint to reference-atom cutoff in Å\n"
+        << "                          (default: 8.0)\n"
+        << "  --pair-cutoff DIST      Acidic-residue pair distance cutoff in Å\n"
+        << "                          (default: 20.0)\n"
+        << "  --residues RES          Comma-separated acidic residue types to search for\n"
+        << "                          in the query structures (default: GLU,ASP)\n\n"
         << "Output format:\n"
-        << "  RESID  file=<path>  chain=<id>  resName=<name>  resSeq=<id>  minDist=<Å>\n\n"
-        << "  Recover all hits with:\n"
-        << "    grep '^RESID' coord_results.log\n\n"
+        << "  PAIR  file=<path>  res1=<seqID>  res2=<seqID>  dist=<Å>\n\n"
+        << "  Recover all pairs with:\n"
+        << "    grep '^PAIR' coord_results.log\n\n"
         << "Examples:\n"
-        << "  " << prog << " ./structures/ --cx 12.3 --cy 45.6 --cz 7.8 --radius 8.0\n"
-        << "  " << prog << " ./structures/ --cx 0 --cy 0 --cz 0 --radius 15 --residues GLU,ASP\n";
+        << "  # Use all atoms of a ligand residue LIG as the reference:\n"
+        << "  " << prog << " --ref ref.pdb --ref-residues LIG ./structures/\n\n"
+        << "  # Use only the carboxyl oxygens of a known ASP in the reference:\n"
+        << "  " << prog << " --ref ref.pdb --ref-residues ASP --ref-atoms OD1,OD2 ./structures/\n\n"
+        << "  # Wider search radius, GLU only:\n"
+        << "  " << prog << " --ref ref.pdb --carb-cutoff 12.0 --residues GLU ./structures/\n";
 }
 
 static std::vector<std::string> splitComma(const std::string& s)
@@ -87,20 +106,23 @@ static CoordConfig parseCoordArgs(int argc, char* argv[])
         } else if ((arg == "-o" || arg == "--output") && i + 1 < argc) {
             cfg.outputFile = argv[++i];
 
-        } else if (arg == "--cx" && i + 1 < argc) {
-            cfg.cx = std::stod(argv[++i]);
+        } else if (arg == "--ref" && i + 1 < argc) {
+            cfg.refPath = argv[++i];
 
-        } else if (arg == "--cy" && i + 1 < argc) {
-            cfg.cy = std::stod(argv[++i]);
+        } else if (arg == "--ref-residues" && i + 1 < argc) {
+            cfg.refResidues = splitComma(argv[++i]);
 
-        } else if (arg == "--cz" && i + 1 < argc) {
-            cfg.cz = std::stod(argv[++i]);
+        } else if (arg == "--ref-atoms" && i + 1 < argc) {
+            cfg.refAtoms = splitComma(argv[++i]);
 
-        } else if (arg == "--radius" && i + 1 < argc) {
-            cfg.radius = std::stod(argv[++i]);
+        } else if (arg == "--carb-cutoff" && i + 1 < argc) {
+            cfg.carbCutoff = std::stod(argv[++i]);
+
+        } else if (arg == "--pair-cutoff" && i + 1 < argc) {
+            cfg.pairCutoff = std::stod(argv[++i]);
 
         } else if (arg == "--residues" && i + 1 < argc) {
-            cfg.filterResidues = splitComma(argv[++i]);
+            cfg.acidicResidues = splitComma(argv[++i]);
 
         } else if (arg[0] != '-') {
             cfg.inputPath = arg;
@@ -114,66 +136,47 @@ static CoordConfig parseCoordArgs(int argc, char* argv[])
     return cfg;
 }
 
-// ── Search logic ──────────────────────────────────────────────────────────────
-
-// A residue hit: the closest atom distance and enough identity fields to
-// write a useful output line.
-struct ResidHit {
-    char        chainID;
-    std::string resName;
-    int         resSeq;
-    double      minDist;  // distance from sphere centre to closest atom
-};
+// ── Reference atom extraction ─────────────────────────────────────────────────
 
 /**
- * For a given atom list, find every unique residue that has at least one atom
- * within `radius` of the point (cx, cy, cz).
+ * Parse the reference PDB and return the subset of atoms selected by the
+ * --ref-residues and --ref-atoms filters.
  *
- * Keyed on {chainID, resSeq} so residues with the same sequence number on
- * different chains are treated as distinct.  Only the minimum per-atom
- * distance is stored for each residue.
+ * An empty filter list means "accept everything" for that dimension, so:
+ *   refResidues = {},  refAtoms = {}   →  every atom in the reference
+ *   refResidues = {"LIG"}, refAtoms = {}   →  all atoms of residue LIG
+ *   refResidues = {"ASP"}, refAtoms = {"OD1","OD2"}  →  ASP carboxyl oxygens only
  */
-static std::vector<ResidHit> findResiduesInSphere(
-        const std::vector<PDBAtom>& atoms,
-        double cx, double cy, double cz, double radius,
-        const std::vector<std::string>& filterResidues)
+static std::vector<PDBAtom> extractReferenceAtoms(
+        const std::string& refPath,
+        const std::vector<std::string>& refResidues,
+        const std::vector<std::string>& refAtoms)
 {
-    const Vec3 centre{cx, cy, cz};
+    const std::vector<PDBAtom> all = parsePDB(refPath);
+    std::vector<PDBAtom> selected;
 
-    // Key: {chainID, resSeq}  →  best (minimum) distance seen for that residue.
-    std::map<std::pair<char, int>, ResidHit> best;
+    for (const auto& atom : all) {
 
-    for (const auto& atom : atoms) {
-
-        // If the user asked for specific residue types, skip others.
-        if (!filterResidues.empty()) {
-            bool wanted = false;
-            for (const auto& r : filterResidues)
-                if (atom.resName == r) { wanted = true; break; }
-            if (!wanted) continue;
+        // Residue filter.
+        if (!refResidues.empty()) {
+            bool found = false;
+            for (const auto& r : refResidues)
+                if (atom.resName == r) { found = true; break; }
+            if (!found) continue;
         }
 
-        const double dist = distance(centre, atom.pos);
-        if (dist >= radius) continue;
+        // Atom-name filter.
+        if (!refAtoms.empty()) {
+            bool found = false;
+            for (const auto& a : refAtoms)
+                if (atom.name == a) { found = true; break; }
+            if (!found) continue;
+        }
 
-        const auto key = std::make_pair(atom.chainID, atom.resSeq);
-        auto it = best.find(key);
-        if (it == best.end() || dist < it->second.minDist)
-            best[key] = {atom.chainID, atom.resName, atom.resSeq, dist};
+        selected.push_back(atom);
     }
 
-    // Flatten and sort by ascending distance.
-    std::vector<ResidHit> hits;
-    hits.reserve(best.size());
-    for (const auto& kv : best)
-        hits.push_back(kv.second);
-
-    std::sort(hits.begin(), hits.end(),
-        [](const ResidHit& a, const ResidHit& b) {
-            return a.minDist < b.minDist;
-        });
-
-    return hits;
+    return selected;
 }
 
 // ── Entry point ───────────────────────────────────────────────────────────────
@@ -182,6 +185,53 @@ int runCoord(int argc, char* argv[])
 {
     const CoordConfig cfg = parseCoordArgs(argc, argv);
 
+    if (cfg.refPath.empty()) {
+        std::cerr << "Error: --ref <reference.pdb> is required.\n"
+                  << "Run '" << argv[0] << " --help' for usage.\n";
+        return 1;
+    }
+
+    // Parse the reference PDB and extract anchor atoms.
+    std::vector<PDBAtom> refAtoms;
+    try {
+        refAtoms = extractReferenceAtoms(cfg.refPath, cfg.refResidues, cfg.refAtoms);
+    } catch (const std::exception& ex) {
+        std::cerr << "Error reading reference file '" << cfg.refPath
+                  << "': " << ex.what() << "\n";
+        return 1;
+    }
+
+    if (refAtoms.empty()) {
+        std::cerr << "Error: no atoms selected from the reference file after filtering.\n"
+                  << "Check --ref-residues and --ref-atoms.\n";
+        return 1;
+    }
+
+    std::cout << "Reference: " << refAtoms.size()
+              << " anchor atom(s) loaded from " << cfg.refPath << "\n";
+
+    // Build the acidic-oxygen map filtered to the user-selected residue types.
+    const std::unordered_map<std::string, std::vector<std::string>> ALL_ACIDIC_OXY = {
+        {"GLU", {"OE1", "OE2"}},
+        {"ASP", {"OD1", "OD2"}}
+    };
+
+    std::unordered_map<std::string, std::vector<std::string>> acidicOxy;
+    for (const auto& res : cfg.acidicResidues) {
+        if (ALL_ACIDIC_OXY.count(res)) {
+            acidicOxy[res] = ALL_ACIDIC_OXY.at(res);
+        } else {
+            std::cerr << "Warning: '" << res
+                      << "' is not in the ACIDIC_OXY table — skipping.\n";
+        }
+    }
+
+    if (acidicOxy.empty()) {
+        std::cerr << "Error: no valid acidic residues selected.  Aborting.\n";
+        return 1;
+    }
+
+    // Open log file.
     std::ofstream logFile(cfg.outputFile);
     if (!logFile) {
         std::cerr << "Error: could not open output file: " << cfg.outputFile << "\n";
@@ -189,18 +239,31 @@ int runCoord(int argc, char* argv[])
     }
 
     // Self-describing log header.
-    logFile << "# [coord] Residues within a spherical coordinate region\n"
-            << "# centre : (" << cfg.cx << ", " << cfg.cy << ", " << cfg.cz << ") Å\n"
-            << "# radius : " << cfg.radius << " Å\n";
-    if (!cfg.filterResidues.empty()) {
-        logFile << "# filter : ";
-        for (size_t k = 0; k < cfg.filterResidues.size(); ++k) {
-            logFile << cfg.filterResidues[k];
-            if (k + 1 < cfg.filterResidues.size()) logFile << ", ";
-        }
-        logFile << "\n";
+    logFile << "# [coord] Acidic-residue pairs near a reference structure\n"
+            << "# reference   : " << cfg.refPath << "\n"
+            << "# ref-residues: "
+            << (cfg.refResidues.empty() ? "(all)" : "");
+    for (size_t k = 0; k < cfg.refResidues.size(); ++k) {
+        logFile << cfg.refResidues[k];
+        if (k + 1 < cfg.refResidues.size()) logFile << ", ";
     }
-    logFile << "#\n";
+    logFile << "\n# ref-atoms   : "
+            << (cfg.refAtoms.empty() ? "(all)" : "");
+    for (size_t k = 0; k < cfg.refAtoms.size(); ++k) {
+        logFile << cfg.refAtoms[k];
+        if (k + 1 < cfg.refAtoms.size()) logFile << ", ";
+    }
+    logFile << "\n# anchor atoms: " << refAtoms.size() << "\n"
+            << "# carb-cutoff : " << cfg.carbCutoff << " Å\n"
+            << "# pair-cutoff : " << cfg.pairCutoff << " Å\n"
+            << "# residues    : ";
+    for (size_t k = 0; k < cfg.acidicResidues.size(); ++k) {
+        logFile << cfg.acidicResidues[k];
+        if (k + 1 < cfg.acidicResidues.size()) logFile << ", ";
+    }
+    logFile << "\n#\n";
+
+    // ── Query loop ────────────────────────────────────────────────────────────
 
     StructuresDir wdir(cfg.inputPath);
     const std::vector<std::filesystem::directory_entry> files(
@@ -220,25 +283,29 @@ int runCoord(int argc, char* argv[])
             continue;
         }
 
-        const auto hits = findResiduesInSphere(
-            atoms, cfg.cx, cfg.cy, cfg.cz, cfg.radius, cfg.filterResidues);
+        // Stage 1: find acidic residues whose carboxyl midpoint is within
+        // carbCutoff of any reference atom.  We reuse FilterAcidicResidues
+        // directly — refAtoms plays the same role as CarbAtoms in 'dist'.
+        auto candidates = FilterAcidicResidues(atoms, refAtoms, acidicOxy, cfg.carbCutoff);
+
+        // Stage 2: deduplicated pairs within pairCutoff, sorted by distance.
+        auto pairs = FilterResiduePairs(candidates, cfg.pairCutoff);
 
         logFile << "# FILE: " << file.path() << "\n";
 
-        if (hits.empty()) {
-            logFile << "  (no residues found)\n";
+        if (pairs.empty()) {
+            logFile << "  (no pairs found)\n";
             continue;
         }
 
-        for (const auto& h : hits) {
+        for (const auto& p : pairs) {
             std::ostringstream oss;
             oss << std::fixed << std::setprecision(3);
-            oss << "RESID"
-                << "  file="    << file.path()
-                << "  chain="   << h.chainID
-                << "  resName=" << h.resName
-                << "  resSeq="  << h.resSeq
-                << "  minDist=" << h.minDist;
+            oss << "PAIR"
+                << "  file=" << file.path()
+                << "  res1=" << p.first.first
+                << "  res2=" << p.first.second
+                << "  dist=" << p.second;
             logFile << oss.str() << "\n";
         }
     }
