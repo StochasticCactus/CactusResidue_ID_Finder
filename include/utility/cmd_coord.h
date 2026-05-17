@@ -48,6 +48,10 @@ struct CoordConfig {
     // Empty = use all atoms of the selected residues.
     std::vector<std::string> refAtoms = {};
 
+    // Residue sequence numbers to extract from the reference PDB.
+    // Empty = use all sequence numbers of the selected residues.
+    std::vector<int> refSeqIDs = {};
+
     // Distance (Å) from an acidic-residue carboxyl midpoint to any reference atom.
     double carbCutoff = 8.0;
 

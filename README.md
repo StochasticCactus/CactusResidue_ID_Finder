@@ -135,6 +135,7 @@ This is useful when you have a known structure — a co-crystallised ligand, an 
 | `--ref FILE` | *(required)* | Path to the reference PDB file |
 | `--ref-residues RES` | *(all residues)* | Comma-separated residue names to extract from the reference |
 | `--ref-atoms ATOMS` | *(all atoms)* | Comma-separated atom names to extract from those residues |
+| `--ref-seqid IDS` | *(all sequence numbers)* | Comma-separated residue sequence numbers to extract from the reference |
 | `--carb-cutoff DIST` | `8.0` | How close (Å) a carboxyl midpoint must be to a reference atom to qualify |
 | `--pair-cutoff DIST` | `20.0` | Maximum distance (Å) between two candidates to form a pair |
 | `--residues RES` | `GLU,ASP` | Which acidic residue types to search for in the query structures |
@@ -168,9 +169,21 @@ cactus_resid coord --ref ref.pdb \
     --carb-cutoff 12.0 --residues GLU \
     -o glu_near_lig.log \
     ./structures/
+
+# Pin to one specific ASP by sequence number
+cactus_resid coord --ref ref.pdb \
+    --ref-residues ASP --ref-seqid 142 \
+    ./structures/
+
+# Use two specific residues by sequence number, only their carboxyl oxygens
+cactus_resid coord --ref ref.pdb \
+    --ref-residues ASP,GLU \
+    --ref-seqid 142,158 \
+    --ref-atoms OD1,OD2,OE1,OE2 \
+    ./structures/
 ```
 
-> **Note on multiple reference residues:** `--ref-residues` accepts a comma-separated list of any length. If your reference PDB contains several ASP residues and you write `--ref-residues ASP`, all of them are used as anchors. If you need to pin the search to one specific residue by sequence number, contact the developer to request a `--ref-seqid` flag.
+> **Note on multiple reference residues:** `--ref-residues` accepts a comma-separated list of any length. If your reference PDB contains several ASP residues and you write `--ref-residues ASP`, all of them are used as anchors. To pin the search to specific residues by position, use `--ref-seqid` with a comma-separated list of sequence numbers (e.g. `--ref-seqid 142,158`). The three reference filters — `--ref-residues`, `--ref-seqid`, and `--ref-atoms` — can be combined freely; an atom must pass every filter that is specified.
 
 ---
 

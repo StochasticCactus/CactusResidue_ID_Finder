@@ -63,6 +63,8 @@ static void printCoordHelp(const char* prog)
         << "                          reference (default: all residues)\n"
         << "  --ref-atoms ATOMS       Comma-separated atom names to extract from those\n"
         << "                          residues (default: all atoms)\n"
+        << "  --ref-seqid IDS         Comma-separated residue sequence numbers to extract\n"
+        << "                          from the reference (e.g. 142,158; default: all)\n"
         << "  --carb-cutoff DIST      Carboxyl-midpoint to reference-atom cutoff in Å\n"
         << "                          (default: 8.0)\n"
         << "  --pair-cutoff DIST      Acidic-residue pair distance cutoff in Å\n"
@@ -92,6 +94,16 @@ static std::vector<std::string> splitComma(const std::string& s)
     return result;
 }
 
+static std::vector<int> splitInt(const std::string& s)
+{
+    std::vector<int> result;
+    std::stringstream ss(s);
+    std::string token;
+    while (std::getline(ss, token, ','))
+        if (!token.empty()) result.push_back(std::stoi(token));
+    return result;
+}
+
 static CoordConfig parseCoordArgs(int argc, char* argv[])
 {
     CoordConfig cfg;
@@ -114,6 +126,9 @@ static CoordConfig parseCoordArgs(int argc, char* argv[])
 
         } else if (arg == "--ref-atoms" && i + 1 < argc) {
             cfg.refAtoms = splitComma(argv[++i]);
+
+        } else if (arg == "--ref-seqid" && i + 1 < argc) {
+            cfg.refSeqIDs = splitInt(argv[++i]);
 
         } else if (arg == "--carb-cutoff" && i + 1 < argc) {
             cfg.carbCutoff = std::stod(argv[++i]);
@@ -150,7 +165,8 @@ static CoordConfig parseCoordArgs(int argc, char* argv[])
 static std::vector<PDBAtom> extractReferenceAtoms(
         const std::string& refPath,
         const std::vector<std::string>& refResidues,
-        const std::vector<std::string>& refAtoms)
+        const std::vector<std::string>& refAtoms,
+        const std::vector<int>& refSeqIDs)
 {
     const std::vector<PDBAtom> all = parsePDB(refPath);
     std::vector<PDBAtom> selected;
@@ -170,6 +186,14 @@ static std::vector<PDBAtom> extractReferenceAtoms(
             bool found = false;
             for (const auto& a : refAtoms)
                 if (atom.name == a) { found = true; break; }
+            if (!found) continue;
+        }
+
+        // Sequence-number filter.
+        if (!refSeqIDs.empty()) {
+            bool found = false;
+            for (const int id : refSeqIDs)
+                if (atom.resSeq == id) { found = true; break; }
             if (!found) continue;
         }
 
@@ -194,7 +218,7 @@ int runCoord(int argc, char* argv[])
     // Parse the reference PDB and extract anchor atoms.
     std::vector<PDBAtom> refAtoms;
     try {
-        refAtoms = extractReferenceAtoms(cfg.refPath, cfg.refResidues, cfg.refAtoms);
+        refAtoms = extractReferenceAtoms(cfg.refPath, cfg.refResidues, cfg.refAtoms, cfg.refSeqIDs);
     } catch (const std::exception& ex) {
         std::cerr << "Error reading reference file '" << cfg.refPath
                   << "': " << ex.what() << "\n";
@@ -252,6 +276,13 @@ int runCoord(int argc, char* argv[])
     for (size_t k = 0; k < cfg.refAtoms.size(); ++k) {
         logFile << cfg.refAtoms[k];
         if (k + 1 < cfg.refAtoms.size()) logFile << ", ";
+    }
+    if (!cfg.refSeqIDs.empty()) {
+        logFile << "\n# ref-seqids  : ";
+        for (size_t k = 0; k < cfg.refSeqIDs.size(); ++k) {
+            logFile << cfg.refSeqIDs[k];
+            if (k + 1 < cfg.refSeqIDs.size()) logFile << ", ";
+        }
     }
     logFile << "\n# anchor atoms: " << refAtoms.size() << "\n"
             << "# carb-cutoff : " << cfg.carbCutoff << " Å\n"
