@@ -16,7 +16,10 @@ endif()
 # ── Library: md ───────────────────────────────────────────────────────────────
 # PeriodicTable is header-only, so only PDBReader.cpp needs compiling.
 add_library(md
-    src/PDBReader.cpp)
+    src/PDBReader.cpp 
+    src/Residues.cpp
+    src/sorting.cpp
+)
 
 target_include_directories(md
     PUBLIC
@@ -26,6 +29,8 @@ target_include_directories(md
 
 # ── Executable ────────────────────────────────────────────────────────────────
 add_executable(cactus_resid
-    src/main.cpp)
+    src/main.cpp
+    src/cmd_dist.cpp
+    src/cmd_coord.cpp)
 
 target_link_libraries(cactus_resid PRIVATE md)
