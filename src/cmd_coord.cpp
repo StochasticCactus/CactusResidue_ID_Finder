@@ -8,11 +8,13 @@
  *   --ref FILE --ref-seqid 142,158   carboxyl midpoints of known residues
  *   --point x,y,z                    explicit coordinates (repeatable)
  *
- * One MATCH or NOMATCH line is written per target point per file.
+ * One MATCH / PARTIAL / NOMATCH line is written per file, with numbered
+ * fields (resname1=, res1=, dist1=, resname2=, ...) for each target point.
  *
  * Output:
- *   MATCH    file=<path>  point=<N>  res=<seqID>  resname=<ASP|GLU>  dist=<Å>
- *   NOMATCH  file=<path>  point=<N>  nearest=<Å>  cutoff=<Å>
+ *   MATCH    file=<path>  resname1=<n>  res1=<seqID>  dist1=<Å>  resname2=....
+ *   PARTIAL  file=<path>  resname1=<n>  res1=<seqID>  dist1=<Å>  resname2=NOMATCH ...
+ *   NOMATCH  file=<path>  resname1=NOMATCH  res1=N/A  dist1=N/A(nearest=<Å>) ...
  */
 
 #include "utility/cmd_coord.h"
@@ -121,9 +123,9 @@ static CoordConfig parseCoordArgs(int argc, char* argv[])
 {
     CoordConfig cfg;
 
-    // argv[0] = "cactus_resid", argv[1] = "coord"; options start at argv[2].
-    // main.cpp does NOT shift argv for us, so we start at i = 2.
-    for (int i = 2; i < argc; ++i) {
+    // main.cpp shifts argv by 1 before calling runCoord, so:
+    //   argv[0] = "coord", options start at argv[1].
+    for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
 
         if (arg == "-h" || arg == "--help") {
@@ -358,8 +360,35 @@ int runCoord(int argc, char* argv[])
     // ── Query loop ────────────────────────────────────────────────────────────
 
     StructuresDir wdir(cfg.inputPath);
-    const std::vector<std::filesystem::directory_entry> files(
+    std::vector<std::filesystem::directory_entry> files(
         wdir.dirFiles(), std::filesystem::directory_iterator{});
+    // Natural sort: embedded digit-runs are compared as integers so that
+    // model_9.pdb < model_10.pdb (lexicographic sort would invert these).
+    auto naturalLess = [](const std::filesystem::directory_entry& a,
+                          const std::filesystem::directory_entry& b)
+    {
+        const std::string sa = a.path().filename().string();
+        const std::string sb = b.path().filename().string();
+        std::size_t i = 0, j = 0;
+        while (i < sa.size() && j < sb.size()) {
+            if (std::isdigit((unsigned char)sa[i]) &&
+                std::isdigit((unsigned char)sb[j])) {
+                // consume the full digit run from each side
+                std::size_t ni = i, nj = j;
+                while (ni < sa.size() && std::isdigit((unsigned char)sa[ni])) ++ni;
+                while (nj < sb.size() && std::isdigit((unsigned char)sb[nj])) ++nj;
+                const long long na = std::stoll(sa.substr(i, ni - i));
+                const long long nb = std::stoll(sb.substr(j, nj - j));
+                if (na != nb) return na < nb;
+                i = ni; j = nj;
+            } else {
+                if (sa[i] != sb[j]) return sa[i] < sb[j];
+                ++i; ++j;
+            }
+        }
+        return sa.size() < sb.size();
+    };
+    std::sort(files.begin(), files.end(), naturalLess);
     const size_t total = files.size();
 
     size_t totalMatches = 0;
@@ -382,52 +411,74 @@ int runCoord(int argc, char* argv[])
 
         logFile << "# FILE: " << file.path() << "\n";
 
-        if (midpoints.empty()) {
-            for (size_t pi = 0; pi < targets.size(); ++pi) {
-                logFile << "NOMATCH"
-                        << "  file="    << file.path()
-                        << "  point="   << (pi + 1)
-                        << "  nearest=N/A"
-                        << "  cutoff="  << std::fixed << std::setprecision(3)
-                        << cfg.cutoff   << "\n";
-                ++totalNoMatch;
-            }
-            continue;
-        }
+        // Collect one result per target point, then emit a single line for the file.
+        struct PointResult {
+            bool        matched = false;
+            int         resSeq  = 0;
+            std::string resName;
+            double      dist    = 0.0;
+            double      nearest = std::numeric_limits<double>::max();
+        };
+
+        std::vector<PointResult> results;
+        results.reserve(targets.size());
 
         for (size_t pi = 0; pi < targets.size(); ++pi) {
-            const Vec3& tgt = targets[pi].coords;
-
-            double             bestDist = std::numeric_limits<double>::max();
-            const AcidicMidpoint* best  = nullptr;
-
-            for (const auto& mp : midpoints) {
-                const double d = cactus::sort::distance(tgt, mp.midpoint);
-                if (d < bestDist) { bestDist = d; best = &mp; }
-            }
-
-            std::ostringstream line;
-            line << std::fixed << std::setprecision(3);
-
-            if (bestDist <= cfg.cutoff) {
-                line << "MATCH"
-                     << "  file="    << file.path()
-                     << "  point="   << (pi + 1)
-                     << "  res="     << best->resSeq
-                     << "  resname=" << best->resName
-                     << "  dist="    << bestDist;
-                ++totalMatches;
+            PointResult pr;
+            if (!midpoints.empty()) {
+                const Vec3& tgt  = targets[pi].coords;
+                double bestDist  = std::numeric_limits<double>::max();
+                const AcidicMidpoint* best = nullptr;
+                for (const auto& mp : midpoints) {
+                    const double d = cactus::sort::distance(tgt, mp.midpoint);
+                    if (d < bestDist) { bestDist = d; best = &mp; }
+                }
+                pr.nearest = bestDist;
+                if (bestDist <= cfg.cutoff) {
+                    pr.matched = true;
+                    pr.resSeq  = best->resSeq;
+                    pr.resName = best->resName;
+                    pr.dist    = bestDist;
+                    ++totalMatches;
+                } else {
+                    ++totalNoMatch;
+                }
             } else {
-                line << "NOMATCH"
-                     << "  file="    << file.path()
-                     << "  point="   << (pi + 1)
-                     << "  nearest=" << bestDist
-                     << "  cutoff="  << cfg.cutoff;
                 ++totalNoMatch;
             }
-
-            logFile << line.str() << "\n";
+            results.push_back(pr);
         }
+
+        // Status: MATCH (all hit), PARTIAL (some), NOMATCH (none).
+        const int nMatched = static_cast<int>(
+            std::count_if(results.begin(), results.end(),
+                          [](const PointResult& r){ return r.matched; }));
+        const std::string status =
+            (nMatched == static_cast<int>(results.size())) ? "MATCH"   :
+            (nMatched  > 0)                                ? "PARTIAL" : "NOMATCH";
+
+        // One combined output line per file: resname1= res1= dist1= resname2= ...
+        std::ostringstream oline;
+        oline << std::fixed << std::setprecision(3);
+        oline << status << "  file=" << file.path();
+        for (size_t pi = 0; pi < results.size(); ++pi) {
+            const int   n  = static_cast<int>(pi) + 1;
+            const auto& pr = results[pi];
+            if (pr.matched) {
+                oline << "  resname" << n << "=" << pr.resName
+                      << "  res"     << n << "=" << pr.resSeq
+                      << "  dist"    << n << "=" << pr.dist;
+            } else {
+                std::ostringstream ns;
+                ns << std::fixed << std::setprecision(3);
+                if (pr.nearest == std::numeric_limits<double>::max()) ns << "N/A";
+                else ns << pr.nearest;
+                oline << "  resname" << n << "=NOMATCH"
+                      << "  res"     << n << "=N/A"
+                      << "  dist"    << n << "=N/A(nearest=" << ns.str() << ")";
+            }
+        }
+        logFile << oline.str() << "\n";
     }
 
     cactus::util::printProgress(total, total);

@@ -77,8 +77,35 @@ int runDist(int argc, char* argv[])
     logFile << "#\n";
 
     StructuresDir wdir(cfg.inputPath);
-    const std::vector<std::filesystem::directory_entry> files(
+    std::vector<std::filesystem::directory_entry> files(
         wdir.dirFiles(), std::filesystem::directory_iterator{});
+    // Natural sort: embedded digit-runs are compared as integers so that
+    // model_9.pdb < model_10.pdb (lexicographic sort would invert these).
+    auto naturalLess = [](const std::filesystem::directory_entry& a,
+                          const std::filesystem::directory_entry& b)
+    {
+        const std::string sa = a.path().filename().string();
+        const std::string sb = b.path().filename().string();
+        std::size_t i = 0, j = 0;
+        while (i < sa.size() && j < sb.size()) {
+            if (std::isdigit((unsigned char)sa[i]) &&
+                std::isdigit((unsigned char)sb[j])) {
+                // consume the full digit run from each side
+                std::size_t ni = i, nj = j;
+                while (ni < sa.size() && std::isdigit((unsigned char)sa[ni])) ++ni;
+                while (nj < sb.size() && std::isdigit((unsigned char)sb[nj])) ++nj;
+                const long long na = std::stoll(sa.substr(i, ni - i));
+                const long long nb = std::stoll(sb.substr(j, nj - j));
+                if (na != nb) return na < nb;
+                i = ni; j = nj;
+            } else {
+                if (sa[i] != sb[j]) return sa[i] < sb[j];
+                ++i; ++j;
+            }
+        }
+        return sa.size() < sb.size();
+    };
+    std::sort(files.begin(), files.end(), naturalLess);
     const size_t total = files.size();
 
     for (size_t idx = 0; idx < total; ++idx) {
@@ -109,14 +136,19 @@ int runDist(int argc, char* argv[])
             continue;
         }
 
-        for (const auto& p : pairs) {
+        // One combined line per file: res1= res2= dist1= res3= res4= dist2= ...
+        // Each pair contributes two residue fields and one distance field,
+        // all numbered sequentially (pair N uses res[2N-1], res[2N], dist[N]).
+        {
             std::ostringstream oss;
-            oss << std::fixed << std::setprecision(3)
-                << "PAIR"
-                << "  file=" << file.path()
-                << "  res1=" << p.first.first
-                << "  res2=" << p.first.second
-                << "  dist=" << p.second;
+            oss << std::fixed << std::setprecision(3) << "PAIR  file=" << file.path();
+            int resIdx  = 1;
+            int distIdx = 1;
+            for (const auto& p : pairs) {
+                oss << "  res"  << resIdx++  << "=" << p.first.first
+                    << "  res"  << resIdx++  << "=" << p.first.second
+                    << "  dist" << distIdx++ << "=" << p.second;
+            }
             logFile << oss.str() << "\n";
         }
     }
