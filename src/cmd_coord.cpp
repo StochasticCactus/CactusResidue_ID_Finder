@@ -150,11 +150,6 @@ static CoordConfig parseCoordArgs(int argc, char* argv[])
 
         } else if (arg[0] != '-') {
             cfg.inputPath = arg;
-
-        } else {
-            std::cerr << "Unknown option: " << arg
-                      << "  (run '" << argv[0] << " coord --help' for usage)\n";
-            std::exit(1);
         }
     }
     return cfg;
