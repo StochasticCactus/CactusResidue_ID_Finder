@@ -22,7 +22,7 @@ If you need to compile it yourself you will need:
 - CMake 3.16 or newer
 
 ```bash
-git clone <repository-url>
+git clone <git@github.com:StochasticCactus/CactusResidue_ID_Finder.git>
 cd CactusResidue_ID_Finder
 ```
 ```bash
